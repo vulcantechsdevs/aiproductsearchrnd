@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Product Search</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+      background: #f4f4f4;
+    }
+    h1 {
+      text-align: center;
+    }
+    .search-box {
+      display: flex;
+      justify-content: center;
+      margin-bottom: 20px;
+    }
+    input[type="text"] {
+      width: 300px;
+      padding: 10px;
+      font-size: 16px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+    }
+    button {
+      padding: 10px 15px;
+      margin-left: 10px;
+      border: none;
+      background: #007BFF;
+      color: white;
+      cursor: pointer;
+      border-radius: 4px;
+    }
+    button:hover {
+      background: #0056b3;
+    }
+    .products {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+      gap: 20px;
+    }
+    .product {
+      background: white;
+      padding: 15px;
+      border-radius: 8px;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+      transition: all 0.3s ease;
+    }
+    .product.best-match {
+      background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%);
+      border: 2px solid #28a745;
+      box-shadow: 0 4px 15px rgba(40, 167, 69, 0.3);
+      transform: scale(1.02);
+    }
+    .product.best-match::before {
+      content: "🎯 Best Match";
+      display: block;
+      color: #155724;
+      font-weight: bold;
+      font-size: 12px;
+      margin-bottom: 8px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .product h3 {
+      margin: 0 0 10px;
+    }
+    .product p {
+      color: #555;
+    }
+    .product-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 10px;
+}
+
+.product-images img {
+  object-fit: cover;
+  border: 1px solid #ddd;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+}
+.product p.description {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #555;
+}
+
+.toggle-btn {
+  background: none;
+  border: none;
+  color: #007BFF;
+  cursor: pointer;
+  font-size: 13px;
+  padding: 0;
+  margin-bottom: 10px;
+}
+
+.toggle-btn:hover {
+  text-decoration: underline;
+}
+
+.product-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 10px;
+}
+
+.product-images img {
+  width: 80px;
+  height: 80px;
+  object-fit: cover;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+}
+.specs {
+  margin-top: 10px;
+  font-size: 14px;
+  color: #333;
+}
+
+.specs h4 {
+  margin: 5px 0;
+  font-size: 14px;
+  color: #007BFF;
+}
+
+.specs ul {
+  padding-left: 15px;
+  margin: 0;
+}
+
+.specs li {
+  margin-bottom: 4px;
+}
+
+
+  </style>
+</head>
+<body>
+  <h1>Product Catalog</h1>
+  <div class="search-box">
+    <input type="text" id="searchInput" placeholder="Search products...">
+    <button onclick="searchProducts()">Search</button>
+  </div>
+  
+  <div class="products" id="productList"></div>
+
+  <script>
+    // Fixed: Use correct endpoints for search vs all products
+    async function fetchProducts() {
+      const response = await fetch("http://localhost:8000/products");
+      const data = await response.json();
+      displayProducts(data, false);
+    }
+
+    async function searchProducts() {
+      const query = document.getElementById("searchInput").value;
+      if (!query.trim()) {
+        fetchProducts();
+        return;
+      }
+
+      // Use the search endpoint with query parameter
+      const response = await fetch(`http://localhost:8000/search?q=${encodeURIComponent(query)}`);
+      const data = await response.json();
+      displayProducts(data, true); // Mark as search result
+    }
+
+function displayProducts(data, isSearchResult = false) {
+  const productList = document.getElementById("productList");
+  productList.innerHTML = "";
+
+  if (data.length === 0) {
+    productList.innerHTML = "<p>No products found.</p>";
+    return;
+  }
+
+  data.forEach((product, index) => {
+    const div = document.createElement("div");
+    div.className = "product";
+
+    if (isSearchResult && index === 0 && data.length > 1) {
+      div.classList.add("best-match");
+    }
+
+    const fullDescription = product.description || "";
+    const shortDescription =
+      fullDescription.length > 120
+        ? fullDescription.substring(0, 120) + "..."
+        : fullDescription;
+
+    let productHtml = `
+      <h3>${product.name}</h3>
+      <p><strong>ID:</strong> ${product.id}</p>
+      <p class="description">${shortDescription}</p>
+      <button class="toggle-btn">View More</button>
+    `;
+
+    // ✅ Fix: Convert images string → array
+    let images = [];
+    if (product.images) {
+      if (typeof product.images === "string") {
+        images = product.images.split(",").map(img => img.trim()).filter(Boolean);
+      } else if (Array.isArray(product.images)) {
+        images = product.images;
+      }
+    }
+
+    if (images.length > 0) {
+      productHtml += `<div class="product-images">`;
+      images.forEach(imgUrl => {
+        productHtml += `<img src="${imgUrl}" alt="${product.name}"/>`;
+      });
+      productHtml += `</div>`;
+    }
+
+    // ✅ Fix: Convert specifications JSON string → array
+    let specs = [];
+    if (product.specifications) {
+      try {
+        specs =
+          typeof product.specifications === "string"
+            ? JSON.parse(product.specifications)
+            : product.specifications;
+      } catch (e) {
+        console.error("Invalid specs JSON", product.specifications);
+      }
+    }
+
+    if (specs.length > 0) {
+      productHtml += `<div class="specs"><h4>Specifications:</h4><ul>`;
+      specs.forEach(spec => {
+        productHtml += `<li><strong>${spec.name}:</strong> ${spec.fromValue}</li>`;
+      });
+      productHtml += `</ul></div>`;
+    }
+
+    div.innerHTML = productHtml;
+    productList.appendChild(div);
+
+    // Toggle logic
+    const descElem = div.querySelector(".description");
+    const toggleBtn = div.querySelector(".toggle-btn");
+    toggleBtn.addEventListener("click", () => {
+      if (toggleBtn.innerText === "View More") {
+        descElem.innerText = fullDescription;
+        toggleBtn.innerText = "View Less";
+      } else {
+        descElem.innerText = shortDescription;
+        toggleBtn.innerText = "View More";
+      }
+    });
+  });
+}
+
+
+
+
+
+    // Load all products on page load
+    fetchProducts();
+
+    // Allow Enter key to trigger search
+    document.getElementById("searchInput").addEventListener("keypress", function(e) {
+      if (e.key === "Enter") {
+        searchProducts();
+      }
+    });
+  </script>
+</body>
+</html>

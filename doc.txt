@@ -10,3 +10,6 @@ python -m uvicorn backend:app --reload --port 8000
    pip install chromadb   
    pip install uvicorn    
    pip install fastapi uvicorn chromadb sentence-transformers psycopg2-binary
+   4. in order to embedd data into chroma db run this command 
+   python embed_to_chroma.py
+   

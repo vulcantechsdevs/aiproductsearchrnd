@@ -2,12 +2,15 @@ import psycopg2
 from sentence_transformers import SentenceTransformer
 import chromadb
 import json
+import requests
+from PIL import Image
+from io import BytesIO
 
 # Connect to Postgres
 conn = psycopg2.connect(
     dbname="medworld",
-    user="postgres",      # change if your user is different
-    password="1",         # replace with your actual password
+    user="postgres",
+    password="1",
     host="localhost",
     port="5432"
 )
@@ -17,62 +20,93 @@ cur = conn.cursor()
 cur.execute("SELECT id, name, description, images, specifications FROM products.products_info LIMIT 100;")
 rows = cur.fetchall()
 
-# Load embedding model
-model = SentenceTransformer('all-MiniLM-L6-v2')
+# Load CLIP model (can handle text + image)
+clip_model = SentenceTransformer("clip-ViT-B-32")
 
 # Initialize Chroma client
 chroma_client = chromadb.PersistentClient(path="./chroma_db")
 
-# Delete old collection & create new
-try:
-    chroma_client.delete_collection("products")
-    print("🗑️ Old collection deleted")
-except:
-    pass
+# Delete old collections
+for coll in ["products_text", "products_image"]:
+    try:
+        chroma_client.delete_collection(coll)
+        print(f"🗑️ Old collection {coll} deleted")
+    except:
+        pass
 
-collection = chroma_client.create_collection(name="products")
-
-
+# Create new collections
+text_collection = chroma_client.create_collection(name="products_text")
+image_collection = chroma_client.create_collection(name="products_image")
 
 for row in rows:
-    # Adjust unpacking based on your SELECT query
-    prod_id, name, description, images, specifications = row  
+    prod_id, name, description, images, specifications = row
     content = f"{name}: {description}"
-    embedding = model.encode(content).tolist()
 
-    # ✅ Handle images: store as comma-separated string
-    image_str = None
+    # ✅ Text embedding
+    text_embedding = clip_model.encode(content).tolist()
+
+    # ✅ Handle images (download & embed)
+    image_embeddings = []
+    image_str_list = []
+
     if images:
-        if isinstance(images, list):   # if already a list
-            image_str = ",".join(images)
-        else:                          # if it's a single string
-            image_str = str(images)
+        if isinstance(images, list):
+            image_list = images
+        else:
+            image_list = [str(images)]
 
-    # ✅ Handle specifications: store as JSON string
-    specs_str = None
+        for img_url in image_list:
+            try:
+                response = requests.get(img_url, timeout=5)
+                img = Image.open(BytesIO(response.content)).convert("RGB")
+                emb = clip_model.encode(img).tolist()
+                image_embeddings.append((img_url, emb))
+                image_str_list.append(img_url)
+            except Exception as e:
+                print(f"⚠️ Failed to process image {img_url} for product {prod_id}: {e}")
+
+    # ✅ Handle specifications
+    specs_str = "[]"
     if specifications:
         try:
-            # Ensure it's always valid JSON string
             specs_str = json.dumps(specifications if isinstance(specifications, list) else specifications)
         except Exception as e:
             print(f"⚠️ Could not serialize specifications for product {prod_id}: {e}")
-            specs_str = "[]"
 
-    # Add to Chroma
-    collection.add(
-        ids=[str(prod_id)],
+    # ✅ Add text embedding to text collection
+    text_collection.add(
+        ids=[f"text-{prod_id}"],
         documents=[content],
-        embeddings=[embedding],
+        embeddings=[text_embedding],
         metadatas=[{
+            "id": prod_id,
+            "type": "text",
             "name": name,
             "description": description,
-            "images": image_str,
+            "images": ",".join(image_str_list),
             "specifications": specs_str
         }]
     )
+
+    # ✅ Add image embeddings to image collection - FIXED: Use consistent metadata structure
+    for idx, (img_url, emb) in enumerate(image_embeddings):
+        image_collection.add(
+            ids=[f"image-{prod_id}-{idx}"],
+            documents=[f"{name} (image)"],
+            embeddings=[emb],
+            metadatas=[{
+                "id": prod_id,
+                "type": "image",
+                "name": name,
+                "description": description,
+                "images": ",".join(image_str_list),  # CHANGED: Use "images" (plural) with all images
+                "specifications": specs_str
+            }]
+        )
+
     print(f"✅ Added product: {name}")
 
-print("🎉 Data inserted into Chroma successfully!")
+print("🎉 Text + Image Data inserted into Chroma successfully!")
 
 cur.close()
 conn.close()

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Product Search</title>
+  <title>MEDWORLD PRODUCT SEARCH</title>
   <style>
     body {
       font-family: Arial, sans-serif;
@@ -16,9 +16,9 @@
       display: flex;
       justify-content: center;
       margin-bottom: 20px;
+      gap: 10px;
     }
-    input[type="text"] {
-      width: 300px;
+    input[type="text"], input[type="file"] {
       padding: 10px;
       font-size: 16px;
       border: 1px solid #ccc;
@@ -26,7 +26,6 @@
     }
     button {
       padding: 10px 15px;
-      margin-left: 10px;
       border: none;
       background: #007BFF;
       color: white;
@@ -35,6 +34,10 @@
     }
     button:hover {
       background: #0056b3;
+    }
+    button:disabled {
+      background: #6c757d;
+      cursor: not-allowed;
     }
     .products {
       display: grid;
@@ -71,208 +74,297 @@
       color: #555;
     }
     .product-images {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-  margin-top: 10px;
-}
-
-.product-images img {
-  object-fit: cover;
-  border: 1px solid #ddd;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.1);
-}
-.product p.description {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  color: #555;
-}
-
-.toggle-btn {
-  background: none;
-  border: none;
-  color: #007BFF;
-  cursor: pointer;
-  font-size: 13px;
-  padding: 0;
-  margin-bottom: 10px;
-}
-
-.toggle-btn:hover {
-  text-decoration: underline;
-}
-
-.product-images {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-  margin-top: 10px;
-}
-
-.product-images img {
-  width: 80px;
-  height: 80px;
-  object-fit: cover;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.1);
-}
-.specs {
-  margin-top: 10px;
-  font-size: 14px;
-  color: #333;
-}
-
-.specs h4 {
-  margin: 5px 0;
-  font-size: 14px;
-  color: #007BFF;
-}
-
-.specs ul {
-  padding-left: 15px;
-  margin: 0;
-}
-
-.specs li {
-  margin-bottom: 4px;
-}
-
-
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+      margin-top: 10px;
+    }
+    .product-images img {
+      width: 80px;
+      height: 80px;
+      object-fit: cover;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+    }
+    .product p.description {
+      display: -webkit-box;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      color: #555;
+    }
+    .toggle-btn {
+      background: none;
+      border: none;
+      color: #007BFF;
+      cursor: pointer;
+      font-size: 13px;
+      padding: 0;
+      margin-bottom: 10px;
+    }
+    .toggle-btn:hover {
+      text-decoration: underline;
+    }
+    .specs {
+      margin-top: 10px;
+      font-size: 14px;
+      color: #333;
+    }
+    .specs h4 {
+      margin: 5px 0;
+      font-size: 14px;
+      color: #007BFF;
+    }
+    .specs ul {
+      padding-left: 15px;
+      margin: 0;
+    }
+    .specs li {
+      margin-bottom: 4px;
+    }
+    .error-message {
+      color: #dc3545;
+      background: #f8d7da;
+      border: 1px solid #f5c6cb;
+      padding: 10px;
+      border-radius: 4px;
+      margin: 10px 0;
+      text-align: center;
+    }
+    .loading {
+      text-align: center;
+      color: #6c757d;
+      font-style: italic;
+      padding: 20px;
+    }
   </style>
 </head>
 <body>
   <h1>Product Catalog</h1>
   <div class="search-box">
     <input type="text" id="searchInput" placeholder="Search products...">
-    <button onclick="searchProducts()">Search</button>
+    <button type="button" onclick="searchProducts()">Search</button>
+    <input type="file" id="imageInput" accept="image/*">
+    <button type="button" id="imageSearchBtn" onclick="imageSearch()">Image Search</button>
   </div>
   
   <div class="products" id="productList"></div>
 
-  <script>
-    // Fixed: Use correct endpoints for search vs all products
-    async function fetchProducts() {
+<script>
+  async function fetchProducts() {
+    try {
+      showLoading();
       const response = await fetch("http://localhost:8000/products");
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
       const data = await response.json();
       displayProducts(data, false);
+    } catch (error) {
+      showError(`Failed to fetch products: ${error.message}`);
     }
-
-    async function searchProducts() {
-      const query = document.getElementById("searchInput").value;
-      if (!query.trim()) {
-        fetchProducts();
-        return;
-      }
-
-      // Use the search endpoint with query parameter
-      const response = await fetch(`http://localhost:8000/search?q=${encodeURIComponent(query)}`);
-      const data = await response.json();
-      displayProducts(data, true); // Mark as search result
-    }
-
-function displayProducts(data, isSearchResult = false) {
-  const productList = document.getElementById("productList");
-  productList.innerHTML = "";
-
-  if (data.length === 0) {
-    productList.innerHTML = "<p>No products found.</p>";
-    return;
   }
 
-  data.forEach((product, index) => {
-    const div = document.createElement("div");
-    div.className = "product";
-
-    if (isSearchResult && index === 0 && data.length > 1) {
-      div.classList.add("best-match");
+  async function searchProducts() {
+    const query = document.getElementById("searchInput").value;
+    if (!query.trim()) {
+      fetchProducts();
+      return;
     }
-
-    const fullDescription = product.description || "";
-    const shortDescription =
-      fullDescription.length > 120
-        ? fullDescription.substring(0, 120) + "..."
-        : fullDescription;
-
-    let productHtml = `
-      <h3>${product.name}</h3>
-      <p><strong>ID:</strong> ${product.id}</p>
-      <p class="description">${shortDescription}</p>
-      <button class="toggle-btn">View More</button>
-    `;
-
-    // ✅ Fix: Convert images string → array
-    let images = [];
-    if (product.images) {
-      if (typeof product.images === "string") {
-        images = product.images.split(",").map(img => img.trim()).filter(Boolean);
-      } else if (Array.isArray(product.images)) {
-        images = product.images;
+    
+    try {
+      showLoading();
+      const response = await fetch(`http://localhost:8000/search?q=${encodeURIComponent(query)}`);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
+      const data = await response.json();
+      displayProducts(data, true);
+    } catch (error) {
+      showError(`Search failed: ${error.message}`);
     }
+  }
 
-    if (images.length > 0) {
-      productHtml += `<div class="product-images">`;
-      images.forEach(imgUrl => {
-        productHtml += `<img src="${imgUrl}" alt="${product.name}"/>`;
+  async function imageSearch() {
+    const fileInput = document.getElementById("imageInput");
+    const imageSearchBtn = document.getElementById("imageSearchBtn");
+    
+    // Prevent default form submission behavior
+    event.preventDefault();
+    event.stopPropagation();
+    
+    if (fileInput.files.length === 0) {
+      showError("Please select an image first");
+      return;
+    }
+    
+    try {
+      // Disable button to prevent double-clicks
+      imageSearchBtn.disabled = true;
+      imageSearchBtn.textContent = "Searching...";
+      
+      showLoading();
+      
+      const formData = new FormData();
+      formData.append("file", fileInput.files[0]);
+      
+      console.log("Sending image search request...");
+      
+      const response = await fetch("http://localhost:8000/image-search", {
+        method: "POST",
+        body: formData,
       });
-      productHtml += `</div>`;
-    }
-
-    // ✅ Fix: Convert specifications JSON string → array
-    let specs = [];
-    if (product.specifications) {
-      try {
-        specs =
-          typeof product.specifications === "string"
-            ? JSON.parse(product.specifications)
-            : product.specifications;
-      } catch (e) {
-        console.error("Invalid specs JSON", product.specifications);
+      
+      console.log("Response status:", response.status);
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
       }
+      
+      const data = await response.json();
+      console.log("Image search results:", data);
+      
+      displayProducts(data, true);
+      
+    } catch (error) {
+      console.error("Image search error:", error);
+      showError(`Image search failed: ${error.message}`);
+    } finally {
+      // Re-enable button
+      imageSearchBtn.disabled = false;
+      imageSearchBtn.textContent = "Image Search";
+    }
+  }
+
+  function showLoading() {
+    const productList = document.getElementById("productList");
+    productList.innerHTML = '<div class="loading">Loading...</div>';
+  }
+
+  function showError(message) {
+    const productList = document.getElementById("productList");
+    productList.innerHTML = `<div class="error-message">${message}</div>`;
+  }
+
+  function displayProducts(data, isSearchResult = false) {
+    const productList = document.getElementById("productList");
+    productList.innerHTML = "";
+
+    // If backend ever wraps with {query_image, results}, unwrap
+    if (!Array.isArray(data) && data && data.results) {
+      if (data.query_image) {
+        const queryDiv = document.createElement("div");
+        queryDiv.className = "query-image";
+        queryDiv.innerHTML = `
+          <h3>Query Image</h3>
+          <img src="${data.query_image}" alt="Uploaded query image"/>
+        `;
+        productList.appendChild(queryDiv);
+      }
+      data = data.results;
     }
 
-    if (specs.length > 0) {
-      productHtml += `<div class="specs"><h4>Specifications:</h4><ul>`;
-      specs.forEach(spec => {
-        productHtml += `<li><strong>${spec.name}:</strong> ${spec.fromValue}</li>`;
+    if (!Array.isArray(data) || data.length === 0) {
+      productList.innerHTML += "<p>No products found.</p>";
+      return;
+    }
+
+    data.forEach((product, index) => {
+      const div = document.createElement("div");
+      div.className = "product";
+
+      if (isSearchResult && index === 0 && data.length > 1) {
+        div.classList.add("best-match");
+      }
+
+      const fullDescription = product.description || "";
+      const shortDescription =
+        fullDescription.length > 120
+          ? fullDescription.substring(0, 120) + "..."
+          : fullDescription;
+
+      let productHtml = `
+        <h3>${product.name || ""}</h3>
+        <p><strong>ID:</strong> ${product.id || ""}</p>
+        <p class="description">${shortDescription}</p>
+        <button class="toggle-btn">View More</button>
+      `;
+
+      // ✅ Normalize images (string or array)
+      let images = [];
+      if (product.images) {
+        if (typeof product.images === "string") {
+          images = product.images.split(",").map(s => s.trim()).filter(Boolean);
+        } else if (Array.isArray(product.images)) {
+          images = product.images;
+        }
+      }
+      if (images.length > 0) {
+        productHtml += `<div class="product-images">`;
+        images.forEach(url => {
+          productHtml += `<img src="${url}" alt="${product.name || 'Product'}" onerror="this.style.display='none'"/>`;
+        });
+        productHtml += `</div>`;
+      }
+
+      // ✅ Normalize specs (JSON string or array)
+      let specs = [];
+      if (product.specifications) {
+        try {
+          specs = Array.isArray(product.specifications)
+            ? product.specifications
+            : JSON.parse(product.specifications);
+        } catch (e) {
+          console.error("Invalid specs JSON", product.specifications);
+        }
+      }
+      if (Array.isArray(specs) && specs.length > 0) {
+        productHtml += `<div class="specs"><h4>Specifications:</h4><ul>`;
+        specs.forEach(spec => {
+          const n = (spec && spec.name) || "";
+          const v = (spec && (spec.fromValue ?? spec.value ?? spec.toValue ?? "")) || "";
+          productHtml += `<li><strong>${n}:</strong> ${v}</li>`;
+        });
+        productHtml += `</ul></div>`;
+      }
+
+      div.innerHTML = productHtml;
+      productList.appendChild(div);
+
+      const descElem = div.querySelector(".description");
+      const toggleBtn = div.querySelector(".toggle-btn");
+      toggleBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (toggleBtn.innerText === "View More") {
+          descElem.innerText = fullDescription;
+          toggleBtn.innerText = "View Less";
+        } else {
+          descElem.innerText = shortDescription;
+          toggleBtn.innerText = "View More";
+        }
       });
-      productHtml += `</ul></div>`;
-    }
-
-    div.innerHTML = productHtml;
-    productList.appendChild(div);
-
-    // Toggle logic
-    const descElem = div.querySelector(".description");
-    const toggleBtn = div.querySelector(".toggle-btn");
-    toggleBtn.addEventListener("click", () => {
-      if (toggleBtn.innerText === "View More") {
-        descElem.innerText = fullDescription;
-        toggleBtn.innerText = "View Less";
-      } else {
-        descElem.innerText = shortDescription;
-        toggleBtn.innerText = "View More";
-      }
     });
+  }
+
+  // Load all products on page load
+  window.addEventListener('DOMContentLoaded', fetchProducts);
+
+  // Enter key triggers text search
+  document.getElementById("searchInput").addEventListener("keypress", function(e) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      searchProducts();
+    }
   });
-}
 
+  // Clear file input when clicked (allows re-selecting same file)
+  document.getElementById("imageInput").addEventListener("click", function() {
+    this.value = '';
+  });
+</script>
 
-
-
-
-    // Load all products on page load
-    fetchProducts();
-
-    // Allow Enter key to trigger search
-    document.getElementById("searchInput").addEventListener("keypress", function(e) {
-      if (e.key === "Enter") {
-        searchProducts();
-      }
-    });
-  </script>
 </body>
 </html>

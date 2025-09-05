@@ -1,14 +1,17 @@
-# backend2.py
-from fastapi import FastAPI, Query, File, UploadFile
+from fastapi import FastAPI, UploadFile, File, Query
 from fastapi.middleware.cors import CORSMiddleware
 import chromadb
-import json
 from sentence_transformers import SentenceTransformer
 from PIL import Image
+from pydantic import BaseModel
+from typing import Optional
+from fastapi import HTTPException
 import io
+import json
+import requests
+from io import BytesIO
 
 app = FastAPI()
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -17,178 +20,232 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ---------- Chroma client & collections ----------
+chroma_client = chromadb.PersistentClient(path="./chroma_db")
+text_collection = chroma_client.get_collection("products_text")
+image_collection = chroma_client.get_collection("products_image")
 
-client = chromadb.PersistentClient(path="./chroma_db") 
-text_collection = client.get_or_create_collection("products")  
-
-image_collection = client.get_or_create_collection("products_image")
-
+# ---------- Models ----------
+text_model = SentenceTransformer("all-MiniLM-L6-v2")
 clip_model = SentenceTransformer("clip-ViT-B-32")
 
-def parse_images(meta):
-    images = meta.get("images")
-    if not images:
+# ---------- Helpers ----------
+def parse_images_from_meta(meta):
+    img_str = meta.get("images") if meta else ""
+    if not img_str:
         return []
-    if isinstance(images, str):
-        return [img.strip() for img in images.split(",") if img.strip()]
-    if isinstance(images, list):
-        return images
-    return []
+    return [s.strip() for s in str(img_str).split(",") if s.strip()]
 
-def parse_specs(meta):
-    specs = meta.get("specifications")
-    if not specs:
-        return []
-    if isinstance(specs, str):
-        try:
-            return json.loads(specs)
-        except:
-            return []
-    if isinstance(specs, list):
-        return specs
-    return []
-
-def extract_product_id(collection_id):
-    """
-    Extract the actual product ID from collection IDs.
-    - Text collection: "text-{UUID}" -> "{UUID}" 
-    - Image collection: "image-{UUID}-{index}" -> "{UUID}"
-    - Direct ID: "{UUID}" -> "{UUID}"
-    """
-    if collection_id.startswith("text-"):
-        return collection_id[5:]  # Remove "text-" prefix
-    elif collection_id.startswith("image-"):
-        # For image format: "image-{UUID}-{index}"
-        # Remove "image-" prefix first
-        without_prefix = collection_id[6:]  # Remove "image-"
-        # Find the last hyphen (before the index) and remove everything after it
-        last_hyphen_index = without_prefix.rfind("-")
-        if last_hyphen_index != -1:
-            return without_prefix[:last_hyphen_index]  # Return UUID part
-        return without_prefix  # Fallback if no index found
-    else:
-        return collection_id  # Already a clean product ID
-
-def merge_meta(priority_meta, fallback_meta):
-    """Merge fields from fallback_meta when missing in priority_meta."""
-    if not priority_meta:
-        priority_meta = {}
-    if not fallback_meta:
-        fallback_meta = {}
-
-    merged = dict(fallback_meta)
-    merged.update({k: v for k, v in priority_meta.items() if v not in (None, "", [], {})})
-    return merged
-
-def build_response(ids, metas, docs, distances):
-    response = []
-    for i, (pid, meta, doc, distance) in enumerate(zip(ids, metas, docs, distances)):
-        description = (meta or {}).get("description", "")
-        if not description and doc:
-            parts = doc.split(": ", 1)
-            description = parts[1] if len(parts) > 1 else doc
-
-        # Extract actual product ID from image collection ID format
-        actual_product_id = extract_product_id(pid)
-
-        response.append({
-            "id": actual_product_id,
-            "name": (meta or {}).get("name", ""),
-            "description": description,
-            "images": parse_images(meta or {}),
-            "specifications": parse_specs(meta or {}),
-            "similarity_score": round(1 - distance, 3),
-            "rank": i + 1
-        })
-    return response
-
-def hydrate_with_text_metadata(ids, metas, docs):
-    """
-    For each result id, if images/name/description/specs are missing in metas,
-    fetch from the text collection ('products') and merge.
-    """
-    hydrated_metas, hydrated_docs = [], []
-    for pid, meta, doc in zip(ids, metas, docs):
-        # Extract the actual product ID
-        product_id = extract_product_id(pid)
-        
-        # Try both formats: just the ID and "text-{ID}"
-        fallback_ids = [product_id, f"text-{product_id}"]
-        
-        # Try to find the product in the text collection
-        fallback = None
-        for fid in fallback_ids:
-            try:
-                fallback = text_collection.get(ids=[fid])
-                if fallback and fallback.get("metadatas") and fallback["metadatas"]:
-                    break
-            except:
-                continue
-        
-        if fallback and fallback.get("metadatas") and fallback["metadatas"]:
-            fb_meta = fallback["metadatas"][0] or {}
-            fb_doc = (fallback["documents"][0] or "") if fallback.get("documents") else ""
-            merged_meta = merge_meta(meta or {}, fb_meta)
-            description = merged_meta.get("description", "")
-            if not description and (doc or fb_doc):
-                parts = (doc or fb_doc).split(": ", 1)
-                merged_meta["description"] = parts[1] if len(parts) > 1 else (doc or fb_doc)
-        else:
-            merged_meta = meta or {}
-        
-        hydrated_metas.append(merged_meta)
-        hydrated_docs.append(doc)
-    return hydrated_metas, hydrated_docs
+def build_result_from_meta(meta, doc=None, distance=None, rank=None):
+    if meta.get("deleted"):  # skip deleted
+        return None
+    return {
+        "id": meta.get("id"),
+        "oem_id": meta.get("oem_id"),
+        "name": meta.get("name"),
+        "description": meta.get("description") or (doc or ""),
+        "images": parse_images_from_meta(meta),
+        "specifications": meta.get("specifications"),
+        "similarity_score": round(1 - distance, 3) if distance is not None else None,
+        "rank": rank,
+    }
 
 # ---------- Routes ----------
+@app.get("/")
+def root():
+    return {"message": "Product search (text + image) backend running."}
+
+# ---- All products with pagination ----
 @app.get("/products")
-def get_products():
-    """Return all products from the text collection"""
-    items = text_collection.get()
-    results = []
-    for i, m, doc in zip(items.get("ids", []), items.get("metadatas", []), items.get("documents", [])):
-        description = (m or {}).get("description", "")
-        if not description and doc:
-            parts = doc.split(": ", 1)
-            description = parts[1] if len(parts) > 1 else doc
+def get_all_products(offset: int = 0, limit: int = 50):
+    results = text_collection.get(include=["documents", "metadatas"], offset=offset, limit=limit)
 
-        results.append({
-            "id": i,
-            "name": (m or {}).get("name", ""),
-            "description": description,
-            "images": parse_images(m or {}),
-            "specifications": parse_specs(m or {})
-        })
-    return results
+    products = []
+    for doc, meta in zip(results["documents"], results["metadatas"]):
+        item = build_result_from_meta(meta, doc)
+        if item:
+            products.append(item)
 
+    return {
+        "results": products,
+        "offset": offset,
+        "limit": limit,
+        "count": len(products),
+    }
+
+# ---- Text search ----
 @app.get("/search")
-def search_products(q: str = Query(...), n: int = 5):
-    """Semantic search by text against the text collection"""
-    results = text_collection.query(query_texts=[q], n_results=n)
-    return build_response(
-        results["ids"][0],
-        results["metadatas"][0],
-        results["documents"][0],
-        results["distances"][0]
+def search_text(q: str = Query(...), top_k: int = 100):
+    q = q.strip()
+    if not q:
+        return {"results": []}
+
+    q_emb = text_model.encode(q, normalize_embeddings=True).tolist()
+    results = text_collection.query(query_embeddings=[q_emb], n_results=top_k)
+
+    docs = results.get("documents", [[]])[0]
+    metas = results.get("metadatas", [[]])[0]
+    dists = results.get("distances", [[]])[0]
+
+    out = []
+    for i, (m, doc, d) in enumerate(zip(metas, docs, dists)):
+        item = build_result_from_meta(m, doc, distance=d, rank=i + 1)
+        if item:
+            out.append(item)
+    return {"results": out}
+
+# ---- Image search ----
+@app.post("/image-search")
+async def search_image(file: UploadFile = File(...), top_k: int = 100):
+    data = await file.read()
+    try:
+        img = Image.open(io.BytesIO(data)).convert("RGB")
+    except Exception as e:
+        return {"error": f"Invalid image uploaded: {e}"}
+
+    q_emb = clip_model.encode(img, normalize_embeddings=True).tolist()
+    results = image_collection.query(query_embeddings=[q_emb], n_results=top_k)
+
+    docs = results.get("documents", [[]])[0]
+    metas = results.get("metadatas", [[]])[0]
+    dists = results.get("distances", [[]])[0]
+
+    out = []
+    for i, (m, doc, d) in enumerate(zip(metas, docs, dists)):
+        if m.get("deleted"):  # skip deleted
+            continue
+
+        prod_id = m.get("id")
+        hydrated_meta = dict(m)
+
+        try:
+            text_res = text_collection.get(ids=[f"text-{prod_id}"])
+            if text_res and text_res.get("metadatas") and text_res["metadatas"][0]:
+                tmeta = text_res["metadatas"][0][0] if isinstance(text_res["metadatas"][0], list) else text_res["metadatas"][0]
+                hydrated_meta.update({k: tmeta.get(k) for k in ("name", "description", "images", "specifications", "id", "oem_id", "deleted")})
+        except Exception:
+            pass
+
+        item = build_result_from_meta(hydrated_meta, doc, distance=d, rank=i + 1)
+        if item:
+            out.append(item)
+
+    return {"results": out}
+
+class ProductPayload(BaseModel):
+    id: str
+    oem_id: Optional[str] = None
+    name: Optional[str] = None
+    description: Optional[str] = None
+    images: Optional[str] = None   # comma-separated URLs
+    specifications: Optional[str] = None
+
+    # ---- Insert product ----
+def normalize_image_list(images_field):
+    if not images_field:
+        return []
+    if isinstance(images_field, list):
+        return [str(x).strip() for x in images_field if str(x).strip()]
+    s = str(images_field).strip()
+    if s.startswith("{") and s.endswith("}"):
+        s = s[1:-1].strip()
+    return [p.strip() for p in s.split(",") if p.strip()]
+
+def specs_to_string(spec_field):
+    if not spec_field:
+        return ""
+    if isinstance(spec_field, str):
+        try:
+            parsed = json.loads(spec_field)
+            return json.dumps(parsed, ensure_ascii=False)
+        except Exception:
+            return spec_field
+    try:
+        return json.dumps(spec_field, ensure_ascii=False)
+    except Exception:
+        return str(spec_field)
+# -----New product insert------
+@app.post("/insert")
+def insert_product(payload: dict):
+    prod_id = payload.get("id")
+    if not prod_id:
+        return {"error": "Product id is required"}
+
+    existing = text_collection.get(ids=[f"text-{prod_id}"])
+    if existing and existing.get("metadatas") and existing["metadatas"][0] and not existing["metadatas"][0].get("deleted", False):
+        return {"message": f"Product {prod_id} already exists"}
+
+    meta = {
+        "id": prod_id,
+        "name": payload.get("name"),
+        "description": payload.get("description"),
+        "images": payload.get("images"),
+        "specifications": payload.get("specifications"),
+        "deleted": False
+    }
+
+    doc_text = meta.get("description") or meta.get("name") or ""
+    emb = text_model.encode(doc_text, normalize_embeddings=True).tolist()
+
+    text_collection.upsert(
+        ids=[f"text-{prod_id}"],
+        documents=[doc_text],
+        metadatas=[meta],
+        embeddings=[emb],
     )
 
-@app.post("/image-search")
-async def image_search(file: UploadFile = File(...), n: int = 5):
-    """Semantic search by image using CLIP → then hydrate from text metadata"""
-    image_bytes = await file.read()
-    img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    return {"message": f"Product {prod_id} inserted successfully"}
 
-    # Encode as batch to be safe
-    embedding = clip_model.encode([img], convert_to_numpy=True)[0].tolist()
 
-    results = image_collection.query(query_embeddings=[embedding], n_results=n)
+# ---- Update product ----
+@app.post("/update")
+def update_product(payload: dict):
+    prod_id = payload.get("id")
+    if not prod_id:
+        return {"error": "Product id is required"}
 
-    # Hydrate: pull full product metadata (name, images, specs, description) from text collection
-    ids = results["ids"][0]
-    metas = results["metadatas"][0]
-    docs = results["documents"][0]
-    distances = results["distances"][0]
+    existing = text_collection.get(ids=[f"text-{prod_id}"])
+    if not existing or not existing.get("metadatas") or not existing["metadatas"][0]:
+        return {"error": f"Product {prod_id} not found"}
 
-    metas_h, docs_h = hydrate_with_text_metadata(ids, metas, docs)
+    meta = dict(existing["metadatas"][0])
+    meta.update(payload)
+    meta["deleted"] = False  # keep active if updated
 
-    return build_response(ids, metas_h, docs_h, distances)
+    doc_text = meta.get("description") or meta.get("name") or ""
+    new_emb = text_model.encode(doc_text, normalize_embeddings=True).tolist()
+
+    text_collection.upsert(
+        ids=[f"text-{prod_id}"],
+        documents=[doc_text],
+        metadatas=[meta],
+        embeddings=[new_emb],
+    )
+
+    return {"message": f"Product {prod_id} updated successfully", "updated_meta": meta}
+
+# ---- Soft delete product ----
+@app.post("/delete")
+def soft_delete_product(payload: dict):
+    prod_id = payload.get("id")
+    if not prod_id:
+        return {"error": "Product id is required"}
+
+    existing = text_collection.get(ids=[f"text-{prod_id}"])
+    if not existing or not existing.get("metadatas") or not existing["metadatas"][0]:
+        return {"error": f"Product {prod_id} not found"}
+
+    meta = dict(existing["metadatas"][0])
+    meta["deleted"] = True
+
+    doc_text = meta.get("description") or meta.get("name") or ""
+    emb = text_model.encode(doc_text, normalize_embeddings=True).tolist()
+
+    text_collection.upsert(
+        ids=[f"text-{prod_id}"],
+        documents=[doc_text],
+        metadatas=[meta],
+        embeddings=[emb],
+    )
+
+    return {"message": f"Product {prod_id}  deleted successfully"}

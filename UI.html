@@ -2,16 +2,14 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>MEDWORLD PRODUCT SEARCH</title>
+  <title>Product Search</title>
   <style>
     body {
       font-family: Arial, sans-serif;
       margin: 20px;
       background: #f4f4f4;
     }
-    h1 {
-      text-align: center;
-    }
+    h1 { text-align: center; }
     .search-box {
       display: flex;
       justify-content: center;
@@ -32,13 +30,8 @@
       cursor: pointer;
       border-radius: 4px;
     }
-    button:hover {
-      background: #0056b3;
-    }
-    button:disabled {
-      background: #6c757d;
-      cursor: not-allowed;
-    }
+    button:hover { background: #0056b3; }
+    button:disabled { background: #6c757d; cursor: not-allowed; }
     .products {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
@@ -67,12 +60,8 @@
       text-transform: uppercase;
       letter-spacing: 0.5px;
     }
-    .product h3 {
-      margin: 0 0 10px;
-    }
-    .product p {
-      color: #555;
-    }
+    .product h3 { margin: 0 0 10px; }
+    .product p { color: #555; }
     .product-images {
       display: flex;
       flex-wrap: wrap;
@@ -103,26 +92,11 @@
       padding: 0;
       margin-bottom: 10px;
     }
-    .toggle-btn:hover {
-      text-decoration: underline;
-    }
-    .specs {
-      margin-top: 10px;
-      font-size: 14px;
-      color: #333;
-    }
-    .specs h4 {
-      margin: 5px 0;
-      font-size: 14px;
-      color: #007BFF;
-    }
-    .specs ul {
-      padding-left: 15px;
-      margin: 0;
-    }
-    .specs li {
-      margin-bottom: 4px;
-    }
+    .toggle-btn:hover { text-decoration: underline; }
+    .specs { margin-top: 10px; font-size: 14px; color: #333; }
+    .specs h4 { margin: 5px 0; font-size: 14px; color: #007BFF; }
+    .specs ul { padding-left: 15px; margin: 0; }
+    .specs li { margin-bottom: 4px; }
     .error-message {
       color: #dc3545;
       background: #f8d7da;
@@ -146,101 +120,101 @@
     <input type="text" id="searchInput" placeholder="Search products...">
     <button type="button" onclick="searchProducts()">Search</button>
     <input type="file" id="imageInput" accept="image/*">
-    <button type="button" id="imageSearchBtn" onclick="imageSearch()">Image Search</button>
+    <button type="button" id="imageSearchBtn" onclick="imageSearch(event)">Image Search</button>
+
   </div>
   
   <div class="products" id="productList"></div>
 
 <script>
-  async function fetchProducts() {
+  let offset = 0;
+  const limit = 50;
+  let loading = false;
+  let endReached = false;
+
+  async function fetchProducts(initial = false) {
+    if (loading || endReached) return;
+    loading = true;
+
+    if (initial) {
+      offset = 0;
+      endReached = false;
+      document.getElementById("productList").innerHTML = "";
+    }
+
     try {
-      showLoading();
-      const response = await fetch("http://localhost:8000/products");
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
+      const response = await fetch(`http://localhost:8000/products?offset=${offset}&limit=${limit}`);
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
       const data = await response.json();
-      displayProducts(data, false);
+
+      if (data.results.length === 0) {
+        endReached = true;
+      } else {
+        displayProducts(data.results, false, true);
+        offset += limit;
+      }
     } catch (error) {
       showError(`Failed to fetch products: ${error.message}`);
+    } finally {
+      loading = false;
     }
   }
 
   async function searchProducts() {
     const query = document.getElementById("searchInput").value;
     if (!query.trim()) {
-      fetchProducts();
+      fetchProducts(true);
       return;
     }
-    
     try {
-      showLoading();
       const response = await fetch(`http://localhost:8000/search?q=${encodeURIComponent(query)}`);
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
       const data = await response.json();
-      displayProducts(data, true);
+      displayProducts(data.results, true, false);
     } catch (error) {
       showError(`Search failed: ${error.message}`);
     }
   }
 
-  async function imageSearch() {
-    const fileInput = document.getElementById("imageInput");
-    const imageSearchBtn = document.getElementById("imageSearchBtn");
-    
-    // Prevent default form submission behavior
+  async function imageSearch(event) {
     event.preventDefault();
     event.stopPropagation();
-    
+
+    const fileInput = document.getElementById("imageInput");
+    const imageSearchBtn = document.getElementById("imageSearchBtn");
+
     if (fileInput.files.length === 0) {
       showError("Please select an image first");
       return;
     }
-    
+
     try {
-      // Disable button to prevent double-clicks
       imageSearchBtn.disabled = true;
       imageSearchBtn.textContent = "Searching...";
-      
-      showLoading();
-      
+
       const formData = new FormData();
       formData.append("file", fileInput.files[0]);
-      
-      console.log("Sending image search request...");
-      
+
       const response = await fetch("http://localhost:8000/image-search", {
         method: "POST",
         body: formData,
       });
-      
-      console.log("Response status:", response.status);
-      
+
       if (!response.ok) {
         const errorText = await response.text();
         throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
       }
-      
+
       const data = await response.json();
-      console.log("Image search results:", data);
-      
-      displayProducts(data, true);
-      
+      displayProducts(data.results, true, false);
+
     } catch (error) {
       console.error("Image search error:", error);
       showError(`Image search failed: ${error.message}`);
     } finally {
-      // Re-enable button
       imageSearchBtn.disabled = false;
       imageSearchBtn.textContent = "Image Search";
     }
-  }
-
-  function showLoading() {
-    const productList = document.getElementById("productList");
-    productList.innerHTML = '<div class="loading">Loading...</div>';
   }
 
   function showError(message) {
@@ -248,26 +222,12 @@
     productList.innerHTML = `<div class="error-message">${message}</div>`;
   }
 
-  function displayProducts(data, isSearchResult = false) {
+  function displayProducts(data, isSearchResult = false, append = false) {
     const productList = document.getElementById("productList");
-    productList.innerHTML = "";
-
-    // If backend ever wraps with {query_image, results}, unwrap
-    if (!Array.isArray(data) && data && data.results) {
-      if (data.query_image) {
-        const queryDiv = document.createElement("div");
-        queryDiv.className = "query-image";
-        queryDiv.innerHTML = `
-          <h3>Query Image</h3>
-          <img src="${data.query_image}" alt="Uploaded query image"/>
-        `;
-        productList.appendChild(queryDiv);
-      }
-      data = data.results;
-    }
+    if (!append) productList.innerHTML = "";
 
     if (!Array.isArray(data) || data.length === 0) {
-      productList.innerHTML += "<p>No products found.</p>";
+      if (!append) productList.innerHTML = "<p>No products found.</p>";
       return;
     }
 
@@ -281,18 +241,17 @@
 
       const fullDescription = product.description || "";
       const shortDescription =
-        fullDescription.length > 120
-          ? fullDescription.substring(0, 120) + "..."
-          : fullDescription;
+        fullDescription.length > 120 ? fullDescription.substring(0, 120) + "..." : fullDescription;
 
       let productHtml = `
         <h3>${product.name || ""}</h3>
         <p><strong>ID:</strong> ${product.id || ""}</p>
+        <p><strong>OEM ID:</strong> ${product.oem_id || ""}</p>
         <p class="description">${shortDescription}</p>
         <button class="toggle-btn">View More</button>
       `;
 
-      // ✅ Normalize images (string or array)
+      // images
       let images = [];
       if (product.images) {
         if (typeof product.images === "string") {
@@ -304,12 +263,15 @@
       if (images.length > 0) {
         productHtml += `<div class="product-images">`;
         images.forEach(url => {
-          productHtml += `<img src="${url}" alt="${product.name || 'Product'}" onerror="this.style.display='none'"/>`;
+          productHtml += `
+            <img src="${url}" 
+                 alt="${product.name || 'Product'}" 
+                 onerror="this.onerror=null;this.src='${url}';"/>`;
         });
         productHtml += `</div>`;
       }
 
-      // ✅ Normalize specs (JSON string or array)
+      // specifications
       let specs = [];
       if (product.specifications) {
         try {
@@ -333,26 +295,36 @@
       div.innerHTML = productHtml;
       productList.appendChild(div);
 
+      // ✅ fix: addEventListener only if toggleBtn exists
       const descElem = div.querySelector(".description");
       const toggleBtn = div.querySelector(".toggle-btn");
-      toggleBtn.addEventListener("click", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        if (toggleBtn.innerText === "View More") {
-          descElem.innerText = fullDescription;
-          toggleBtn.innerText = "View Less";
-        } else {
-          descElem.innerText = shortDescription;
-          toggleBtn.innerText = "View More";
-        }
-      });
+      if (toggleBtn && descElem) {
+        toggleBtn.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (toggleBtn.innerText === "View More") {
+            descElem.innerText = fullDescription;
+            toggleBtn.innerText = "View Less";
+          } else {
+            descElem.innerText = shortDescription;
+            toggleBtn.innerText = "View More";
+          }
+        });
+      }
     });
   }
 
-  // Load all products on page load
-  window.addEventListener('DOMContentLoaded', fetchProducts);
+  // Infinite scroll
+  window.addEventListener("scroll", () => {
+    if (window.innerHeight + window.scrollY >= document.body.offsetHeight - 200) {
+      fetchProducts();
+    }
+  });
 
-  // Enter key triggers text search
+  // Initial load
+  window.addEventListener('DOMContentLoaded', () => fetchProducts(true));
+
+  // Enter key triggers search
   document.getElementById("searchInput").addEventListener("keypress", function(e) {
     if (e.key === "Enter") {
       e.preventDefault();
@@ -360,11 +332,12 @@
     }
   });
 
-  // Clear file input when clicked (allows re-selecting same file)
+  // Clear file input when clicked
   document.getElementById("imageInput").addEventListener("click", function() {
     this.value = '';
   });
 </script>
+
 
 </body>
 </html>

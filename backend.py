@@ -224,28 +224,19 @@ def update_product(payload: dict):
 
     return {"message": f"Product {prod_id} updated successfully", "updated_meta": meta}
 
-# ---- Soft delete product ----
+# ---- Permanent delete product ----
 @app.post("/delete")
-def soft_delete_product(payload: dict):
+def permanent_delete_product(payload: dict):
     prod_id = payload.get("id")
-    if not prod_id:
+    if not prod_id: 
         return {"error": "Product id is required"}
-
+    
     existing = text_collection.get(ids=[f"text-{prod_id}"])
     if not existing or not existing.get("metadatas") or not existing["metadatas"][0]:
         return {"error": f"Product {prod_id} not found"}
 
-    meta = dict(existing["metadatas"][0])
-    meta["deleted"] = True
-
-    doc_text = meta.get("description") or meta.get("name") or ""
-    emb = text_model.encode(doc_text, normalize_embeddings=True).tolist()
-
-    text_collection.upsert(
-        ids=[f"text-{prod_id}"],
-        documents=[doc_text],
-        metadatas=[meta],
-        embeddings=[emb],
-    )
+    # Delete from collection
+    text_collection.delete(ids=[f"text-{prod_id}"])
 
     return {"message": f"Product {prod_id}  deleted successfully"}
+

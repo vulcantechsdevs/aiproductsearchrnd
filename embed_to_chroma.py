@@ -39,7 +39,7 @@ print("Models loaded.")
 # -------- Chroma client ----------
 chroma_client = chromadb.PersistentClient(path="./chroma_db")
 
-# Create or reuse collections
+# Create  collections
 text_collection = chroma_client.get_or_create_collection(
     name="products_text",
     metadata={"hnsw:space": "cosine"}

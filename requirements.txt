@@ -1,0 +1,7 @@
+fastapi
+ uvicorn
+ chromadb
+ psycopg2
+ sentence-transformers
+ pillow
+ requests

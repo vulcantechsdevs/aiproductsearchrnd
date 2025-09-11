@@ -1,50 +1,79 @@
+"""
+embed_to_chroma_batch.py
+- Batch process products from Postgres
+- Embeds product text with all-MiniLM-L6-v2
+- Embeds product images with clip-ViT-B-32
+- Stores text embeddings in collection "products_text"
+- Stores image embeddings in collection "products_image"
+"""
+
 import psycopg2
 from sentence_transformers import SentenceTransformer
 import chromadb
 import json
-import aiohttp
-import asyncio
+import requests
 from PIL import Image
 from io import BytesIO
+from transformers import CLIPProcessor
 import time
-import torch
+import shutil
+import os
 
 # -------- Config ----------
-BATCH_SIZE = 1000         # Increased for faster processing (adjust based on memory)
-MAX_PRODUCTS = 200_000    # Adjust if needed
-IMAGE_BATCH_SIZE = 32     # Process images in batches for embedding
-SLEEP_DELAY = 0.01        # Reduced delay for image downloads (adjust based on server)
+BATCH_SIZE = 10          # fetch & embed per batch
+MAX_PRODUCTS = 10    # adjust if needed
+DB_PATH = "./chroma_db"
+
+# -------- Reset ChromaDB folder ----------
+# -------- Reset ChromaDB folder ----------
+def clear_folder(folder):
+    if not os.path.exists(folder):
+        return
+    for filename in os.listdir(folder):
+        file_path = os.path.join(folder, filename)
+        try:
+            if os.path.isfile(file_path) or os.path.islink(file_path):
+                os.unlink(file_path)
+            elif os.path.isdir(file_path):
+                shutil.rmtree(file_path)
+        except Exception as e:
+            print(f"⚠️ Failed to delete {file_path}: {e}")
+    print(f"🗑️ Cleared contents of ChromaDB folder: {folder}")
+
+clear_folder(DB_PATH)
+
 
 # -------- Postgres connection ----------
 conn = psycopg2.connect(
     dbname="medworld",
     user="postgres",
     password="1",
-    host="localhost",
+    host="host.docker.internal",  # Use host.docker.internal for Linux with extra config
     port="5432"
 )
 cur = conn.cursor()
 
 # -------- Models ----------
 print("Loading models...")
-device = "cuda" if torch.cuda.is_available() else "cpu"
-print(f"Using device: {device}")
-text_model = SentenceTransformer("all-MiniLM-L6-v2").to(device)   # Move to GPU if available
-clip_model = SentenceTransformer("clip-ViT-B-32").to(device)      # Move to GPU if available
+text_model = SentenceTransformer("all-MiniLM-L6-v2")   # text
+clip_model = SentenceTransformer("clip-ViT-B-32")      # image (CLIP)
+# Force fast image processor
+processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32", use_fast=True)
 print("Models loaded.")
 
 # -------- Chroma client ----------
-chroma_client = chromadb.PersistentClient(path="./chroma_db")
+chroma_client = chromadb.PersistentClient(path=DB_PATH)
 
-# Create or reuse collections
-text_collection = chroma_client.get_or_create_collection(
+# Fresh collections
+text_collection = chroma_client.create_collection(
     name="products_text",
     metadata={"hnsw:space": "cosine"}
 )
-image_collection = chroma_client.get_or_create_collection(
+image_collection = chroma_client.create_collection(
     name="products_image",
     metadata={"hnsw:space": "cosine"}
 )
+
 
 # -------- Helper functions ----------
 def normalize_image_list(images_field):
@@ -71,15 +100,6 @@ def specs_to_string(spec_field):
     except Exception:
         return str(spec_field)
 
-async def fetch_image(session, url, timeout=6):
-    try:
-        async with session.get(url, timeout=timeout) as resp:
-            if resp.status == 200:
-                return await resp.read()
-            return None
-    except Exception:
-        return None
-
 # -------- Batch Processing ----------
 offset = 0
 total_inserted = 0
@@ -103,21 +123,20 @@ while True:
     text_metas = []
     for prod_id, oem_id, name, description, images_field, specifications in rows:
         prod_id = str(prod_id)
-        oem_id = str(oem_id) if oem_id is not None else ""
+        oem_id = str(oem_id) if oem_id is not None else ""   # handle NULLs
         name = name or ""
         description = description or ""
         specs_str = specs_to_string(specifications)
         image_list = normalize_image_list(images_field)
         images_str = ",".join(image_list)
 
-        # Include id and oem_id for Solution 1
-        content = f"ID: {prod_id}. OEM ID: {oem_id}. {name}. {description}. Specs: {specs_str}"
+        content = f"{name}. {description}. Specs: {specs_str}"
 
         texts.append(content)
         text_ids.append(f"text-{prod_id}")
         text_metas.append({
             "id": prod_id,
-            "oem_id": oem_id,
+            "oem_id": oem_id,   # ✅ added here
             "type": "text",
             "name": name,
             "description": description,
@@ -132,62 +151,38 @@ while True:
         print(f"✅ Inserted {len(texts)} text embeddings (total={total_inserted})")
 
     # ----- IMAGE embeddings -----
-    async def process_image_batch(image_batch):
-        images = []
-        img_ids = []
-        img_metas = []
-        img_docs = []
-
-        async with aiohttp.ClientSession() as session:
-            for prod_id, oem_id, name, description, image_url, specs_str, idx in image_batch:
-                try:
-                    img_data = await fetch_image(session, image_url)
-                    if img_data:
-                        img = Image.open(BytesIO(img_data)).convert("RGB")
-                        images.append(img)
-                        img_ids.append(f"image-{prod_id}-{idx}")
-                        img_docs.append(f"{name} (image)")
-                        img_metas.append({
-                            "id": prod_id,
-                            "oem_id": oem_id,
-                            "type": "image",
-                            "name": name,
-                            "description": description or "",
-                            "images": image_url,
-                            "specifications": specs_str
-                        })
-                except Exception as e:
-                    print(f"⚠ Image failed for {prod_id} url={image_url}: {e}")
-
-        if images:
-            img_embs = clip_model.encode(images, normalize_embeddings=True, batch_size=IMAGE_BATCH_SIZE).tolist()
-            image_collection.add(
-                ids=img_ids,
-                documents=img_docs,
-                embeddings=img_embs,
-                metadatas=img_metas
-            )
-            print(f"   🖼 Embedded {len(images)} images")
-
-    # Process images in batches
-    image_batch = []
     for prod_id, oem_id, name, description, images_field, specifications in rows:
         prod_id = str(prod_id)
-        oem_id = str(oem_id) if oem_id is not None else ""
+        oem_id = str(oem_id) if oem_id is not None else ""   # handle NULLs
         specs_str = specs_to_string(specifications)
         image_list = normalize_image_list(images_field)
         images_str = ",".join(image_list)
 
         for idx, img_url in enumerate(image_list):
-            image_batch.append((prod_id, oem_id, name, description, img_url, specs_str, idx))
-            if len(image_batch) >= IMAGE_BATCH_SIZE:
-                asyncio.run(process_image_batch(image_batch))
-                image_batch = []
-            time.sleep(SLEEP_DELAY)  # Minimal delay for server courtesy
+            try:
+                resp = requests.get(img_url, timeout=6)
+                resp.raise_for_status()
+                img = Image.open(BytesIO(resp.content)).convert("RGB")
+                img_emb = clip_model.encode(img, normalize_embeddings=True).tolist()
 
-    if image_batch:  # Process remaining images
-        asyncio.run(process_image_batch(image_batch))
-        image_batch = []
+                image_collection.add(
+                    ids=[f"image-{prod_id}-{idx}"],
+                    documents=[f"{name} (image)"],
+                    embeddings=[img_emb],
+                    metadatas=[{
+                        "id": prod_id,
+                        "oem_id": oem_id,   # ✅ added here
+                        "type": "image",
+                        "name": name,
+                        "description": description or "",
+                        "images": images_str,
+                        "specifications": specs_str
+                    }]
+                )
+                print(f"   🖼️ image embedded {prod_id}-{idx}")
+            except Exception as e:
+                print(f"⚠️ image failed for {prod_id} url={img_url}: {e}")
+            time.sleep(0.05)  # avoid hammering servers
 
     offset += BATCH_SIZE
     if offset >= MAX_PRODUCTS:

@@ -12,12 +12,17 @@ RUN apt-get update && apt-get install -y \
     build-essential \
  && rm -rf /var/lib/apt/lists/*
 
+# Copy requirements first
 COPY requirements.txt /app/requirements.txt
 
-# ✅ Install requirements (CPU-only PyTorch first)
+# ✅ Install CPU-only PyTorch first (from CPU wheel index)
+RUN pip install --no-cache-dir torch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1 \
+    --extra-index-url https://download.pytorch.org/whl/cpu
+
+# ✅ Then install everything else
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy rest of the app
+# Copy the rest of your app
 COPY . /app
 
 EXPOSE 8000

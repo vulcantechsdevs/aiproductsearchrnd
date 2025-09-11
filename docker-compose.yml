@@ -1,0 +1,34 @@
+version: "3.9"
+
+services:
+  embedder:
+    build: .
+    command: python embed_to_chroma.py
+    volumes:
+      - ./chroma_db:/app/chroma_db
+    depends_on:
+      - db
+
+  backend:
+    build: .
+    command: python backend.py
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./chroma_db:/app/chroma_db
+    depends_on:
+      - db
+
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: medworld
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 1
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:

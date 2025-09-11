@@ -20,21 +20,35 @@ import shutil
 import os
 
 # -------- Config ----------
-BATCH_SIZE = 10          # fetch & embed per batch
-MAX_PRODUCTS = 10    # adjust if needed
+BATCH_SIZE = 500          # fetch & embed per batch
+MAX_PRODUCTS = 200000    # adjust if needed
 DB_PATH = "./chroma_db"
 
 # -------- Reset ChromaDB folder ----------
-if os.path.exists(DB_PATH):
-    shutil.rmtree(DB_PATH)
-    print(f"🗑️ Deleted entire ChromaDB folder: {DB_PATH}")
+# -------- Reset ChromaDB folder ----------
+def clear_folder(folder):
+    if not os.path.exists(folder):
+        return
+    for filename in os.listdir(folder):
+        file_path = os.path.join(folder, filename)
+        try:
+            if os.path.isfile(file_path) or os.path.islink(file_path):
+                os.unlink(file_path)
+            elif os.path.isdir(file_path):
+                shutil.rmtree(file_path)
+        except Exception as e:
+            print(f"⚠️ Failed to delete {file_path}: {e}")
+    print(f"🗑️ Cleared contents of ChromaDB folder: {folder}")
+
+clear_folder(DB_PATH)
+
 
 # -------- Postgres connection ----------
 conn = psycopg2.connect(
     dbname="medworld",
     user="postgres",
     password="1",
-    host="localhost",
+    host="host.docker.internal",  # Use host.docker.internal for Linux with extra config
     port="5432"
 )
 cur = conn.cursor()

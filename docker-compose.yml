@@ -1,23 +1,21 @@
-version: "3.9"
-
 services:
   embedder:
     build: .
     command: python embed_to_chroma.py
     volumes:
       - ./chroma_db:/app/chroma_db
-    depends_on:
-      - db
+    network_mode: "host"
 
   backend:
     build: .
-    command: python backend.py
+    command: uvicorn backend:app --host 0.0.0.0 --port 8000 --reload
     ports:
       - "8000:8000"
     volumes:
       - ./chroma_db:/app/chroma_db
     depends_on:
-      - db
+      db:
+        condition: service_healthy
 
   db:
     image: postgres:17
@@ -29,6 +27,10 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 5s
+      retries: 5
 
 volumes:
   pgdata:

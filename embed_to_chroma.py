@@ -14,11 +14,20 @@ import json
 import requests
 from PIL import Image
 from io import BytesIO
+from transformers import CLIPProcessor
 import time
+import shutil
+import os
 
 # -------- Config ----------
-BATCH_SIZE = 500          # fetch & embed per batch
-MAX_PRODUCTS = 200_000    # adjust if needed
+BATCH_SIZE = 10          # fetch & embed per batch
+MAX_PRODUCTS = 10    # adjust if needed
+DB_PATH = "./chroma_db"
+
+# -------- Reset ChromaDB folder ----------
+if os.path.exists(DB_PATH):
+    shutil.rmtree(DB_PATH)
+    print(f"🗑️ Deleted entire ChromaDB folder: {DB_PATH}")
 
 # -------- Postgres connection ----------
 conn = psycopg2.connect(
@@ -34,20 +43,23 @@ cur = conn.cursor()
 print("Loading models...")
 text_model = SentenceTransformer("all-MiniLM-L6-v2")   # text
 clip_model = SentenceTransformer("clip-ViT-B-32")      # image (CLIP)
+# Force fast image processor
+processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32", use_fast=True)
 print("Models loaded.")
 
 # -------- Chroma client ----------
-chroma_client = chromadb.PersistentClient(path="./chroma_db")
+chroma_client = chromadb.PersistentClient(path=DB_PATH)
 
-# Create  collections
-text_collection = chroma_client.get_or_create_collection(
+# Fresh collections
+text_collection = chroma_client.create_collection(
     name="products_text",
     metadata={"hnsw:space": "cosine"}
 )
-image_collection = chroma_client.get_or_create_collection(
+image_collection = chroma_client.create_collection(
     name="products_image",
     metadata={"hnsw:space": "cosine"}
 )
+
 
 # -------- Helper functions ----------
 def normalize_image_list(images_field):

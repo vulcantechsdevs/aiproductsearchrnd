@@ -165,18 +165,95 @@ def specs_to_string(spec_field):
     except Exception:
         return str(spec_field)
 # -----New product insert------
+# @app.post("/insert")
+# def insert_product(payload: dict):
+#     prod_id = payload.get("id")
+#     if not prod_id:
+#         return {"error": "Product id is required"}
+
+#     existing = text_collection.get(ids=[f"text-{prod_id}"])
+#     if existing and existing.get("metadatas") and existing["metadatas"][0] and not existing["metadatas"][0].get("deleted", False):
+#         return {"message": f"Product {prod_id} already exists"}
+
+#     meta = {
+#         "id": prod_id,
+#         "name": payload.get("name"),
+#         "description": payload.get("description"),
+#         "images": payload.get("images"),
+#         "specifications": payload.get("specifications"),
+#         "deleted": False
+#     }
+
+#     doc_text = meta.get("description") or meta.get("name") or ""
+#     emb = text_model.encode(doc_text, normalize_embeddings=True).tolist()
+
+#     text_collection.upsert(
+#         ids=[f"text-{prod_id}"],
+#         documents=[doc_text],
+#         metadatas=[meta],
+#         embeddings=[emb],
+#     )
+
+#     return {"message": f"Product {prod_id} inserted successfully"}
+
+
+# # ---- Update product ----
+# @app.post("/update")
+# def update_product(payload: dict):
+#     prod_id = payload.get("id")
+#     if not prod_id:
+#         return {"error": "Product id is required"}
+
+#     existing = text_collection.get(ids=[f"text-{prod_id}"])
+#     if not existing or not existing.get("metadatas") or not existing["metadatas"][0]:
+#         return {"error": f"Product {prod_id} not found"}
+
+#     meta = dict(existing["metadatas"][0])
+#     meta.update(payload)
+#     meta["deleted"] = False  # keep active if updated
+
+#     doc_text = meta.get("description") or meta.get("name") or ""
+#     new_emb = text_model.encode(doc_text, normalize_embeddings=True).tolist()
+
+#     text_collection.upsert(
+#         ids=[f"text-{prod_id}"],
+#         documents=[doc_text],
+#         metadatas=[meta],
+#         embeddings=[new_emb],
+#     )
+
+#     return {"message": f"Product {prod_id} updated successfully", "updated_meta": meta}
+
+# # ---- Permanent delete product ----
+# @app.post("/delete")
+# def permanent_delete_product(payload: dict):
+#     prod_id = payload.get("id")
+#     if not prod_id: 
+#         return {"error": "Product id is required"}
+    
+#     existing = text_collection.get(ids=[f"text-{prod_id}"])
+#     if not existing or not existing.get("metadatas") or not existing["metadatas"][0]:
+#         return {"error": f"Product {prod_id} not found"}
+
+#     # Delete from collection
+#     text_collection.delete(ids=[f"text-{prod_id}"])
+
+#     return {"message": f"Product {prod_id}  deleted successfully"}
+
+# -----New product insert------
 @app.post("/insert")
 def insert_product(payload: dict):
-    prod_id = payload.get("id")
-    if not prod_id:
-        return {"error": "Product id is required"}
+    oem_id = payload.get("oem_id")
+    if not oem_id:
+        return {"error": "OEM ID is required"}
 
-    existing = text_collection.get(ids=[f"text-{prod_id}"])
+    existing = text_collection.get(ids=[f"text-{oem_id}"])
     if existing and existing.get("metadatas") and existing["metadatas"][0] and not existing["metadatas"][0].get("deleted", False):
-        return {"message": f"Product {prod_id} already exists"}
+        return {"message": f"Product with OEM ID {oem_id} already exists"}
 
     meta = {
-        "id": prod_id,
+        "id": payload.get("id"),   # keep original DB ID in metadata
+        "oem_id": oem_id,
         "name": payload.get("name"),
         "description": payload.get("description"),
         "images": payload.get("images"),
@@ -188,25 +265,25 @@ def insert_product(payload: dict):
     emb = text_model.encode(doc_text, normalize_embeddings=True).tolist()
 
     text_collection.upsert(
-        ids=[f"text-{prod_id}"],
+        ids=[f"text-{oem_id}"],
         documents=[doc_text],
         metadatas=[meta],
         embeddings=[emb],
     )
 
-    return {"message": f"Product {prod_id} inserted successfully"}
+    return {"message": f"Product with OEM ID {oem_id} inserted successfully"}
 
 
 # ---- Update product ----
 @app.post("/update")
 def update_product(payload: dict):
-    prod_id = payload.get("id")
-    if not prod_id:
-        return {"error": "Product id is required"}
+    oem_id = payload.get("oem_id")
+    if not oem_id:
+        return {"error": "OEM ID is required"}
 
-    existing = text_collection.get(ids=[f"text-{prod_id}"])
+    existing = text_collection.get(ids=[f"text-{oem_id}"])
     if not existing or not existing.get("metadatas") or not existing["metadatas"][0]:
-        return {"error": f"Product {prod_id} not found"}
+        return {"error": f"Product with OEM ID {oem_id} not found"}
 
     meta = dict(existing["metadatas"][0])
     meta.update(payload)
@@ -216,27 +293,27 @@ def update_product(payload: dict):
     new_emb = text_model.encode(doc_text, normalize_embeddings=True).tolist()
 
     text_collection.upsert(
-        ids=[f"text-{prod_id}"],
+        ids=[f"text-{oem_id}"],
         documents=[doc_text],
         metadatas=[meta],
         embeddings=[new_emb],
     )
 
-    return {"message": f"Product {prod_id} updated successfully", "updated_meta": meta}
+    return {"message": f"Product with OEM ID {oem_id} updated successfully", "updated_meta": meta}
+
 
 # ---- Permanent delete product ----
 @app.post("/delete")
 def permanent_delete_product(payload: dict):
-    prod_id = payload.get("id")
-    if not prod_id: 
-        return {"error": "Product id is required"}
+    oem_id = payload.get("oem_id")
+    if not oem_id:
+        return {"error": "OEM ID is required"}
     
-    existing = text_collection.get(ids=[f"text-{prod_id}"])
+    existing = text_collection.get(ids=[f"text-{oem_id}"])
     if not existing or not existing.get("metadatas") or not existing["metadatas"][0]:
-        return {"error": f"Product {prod_id} not found"}
+        return {"error": f"Product with OEM ID {oem_id} not found"}
 
     # Delete from collection
-    text_collection.delete(ids=[f"text-{prod_id}"])
+    text_collection.delete(ids=[f"text-{oem_id}"])
 
-    return {"message": f"Product {prod_id}  deleted successfully"}
-
+    return {"message": f"Product with OEM ID {oem_id} deleted successfully"}

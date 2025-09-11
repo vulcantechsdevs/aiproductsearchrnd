@@ -1,7 +1,13 @@
+# CPU-only PyTorch stack (must be first!)
+torch==2.4.1+cpu     --index-url https://download.pytorch.org/whl/cpu
+torchvision==0.19.1+cpu  --index-url https://download.pytorch.org/whl/cpu
+torchaudio==2.4.1+cpu    --index-url https://download.pytorch.org/whl/cpu
+
+# Core dependencies
 fastapi
- uvicorn
- chromadb
- psycopg2
- sentence-transformers
- pillow
- requests
+uvicorn
+chromadb
+psycopg2
+sentence-transformers
+pillow
+requests

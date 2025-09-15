@@ -25,7 +25,10 @@ MAX_PRODUCTS = 200000    # adjust if needed
 DB_PATH = "./chroma_db"
 
 # -------- Reset ChromaDB folder ----------
+
 # -------- Reset ChromaDB folder ----------
+
+
 def clear_folder(folder):
     if not os.path.exists(folder):
         return

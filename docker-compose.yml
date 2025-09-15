@@ -1,12 +1,4 @@
 services:
-  embedder:
-    build: .
-    command: python embed_to_chroma.py
-    volumes:
-      - ./chroma_db:/app/chroma_db
-    network_mode: "host"
-    runtime: nvidia  # Enable NVIDIA runtime for GPU support
-
   backend:
     build: .
     command: uvicorn backend:app --host 0.0.0.0 --port 8000 --reload
@@ -17,7 +9,6 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    runtime: nvidia  # Enable NVIDIA runtime for GPU support
 
   db:
     image: postgres:17

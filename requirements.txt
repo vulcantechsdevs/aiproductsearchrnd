@@ -6,6 +6,4 @@ sentence-transformers
 pillow
 requests
 python-multipart
-aiohttp
-torch --index-url https://download.pytorch.org/whl/cu118
-torchvision --index-url https://download.pytorch.org/whl/cu118
+

@@ -41,7 +41,7 @@ conn = psycopg2.connect(
     dbname="medworld",
     user="postgres",
     password="1",
-    host="localhost",
+    host="host.docker.internal",
     port="5432"
 )
 cur = conn.cursor()
